@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>클래식 기타 운지 자동 표기기 (Guitar Fingering Annotator)</title>
+    <meta name="description" content="은닉 마르코프 모델(HMM)과 WebAssembly를 활용하여 클래식 기타 악보(MusicXML/MXL)에 최적의 줄 및 왼손 손가락 번호 운지를 자동으로 표기해 주는 웹 도구입니다.">
+    <meta name="keywords" content="클래식 기타, 기타 운지, MusicXML, MXL, HMM, Viterbi, WebAssembly, Pyodide, music21, 자동 표기">
+    <link rel="stylesheet" href="styles.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Space+Grotesk:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="bg-gradient"></div>
+    
+    <main class="container">
+        <header class="header">
+            <h1 class="title">Guitar Fingering <span class="gradient-text">Annotator</span></h1>
+            <p class="subtitle">은닉 마르코프 모델(HMM) 기반 클래식 기타 운지 자동 표기 시스템</p>
+        </header>
+
+        <section class="card glass">
+            <!-- Loading State -->
+            <div id="loading-container" class="state-container">
+                <div class="spinner"></div>
+                <h3 id="loading-status">Pyodide 웹 환경 초기화 중...</h3>
+                <p class="loading-desc">최초 실행 시 Python 환경 및 music21 라이브러리(약 20MB) 다운로드로 인해 15~20초 정도 소요될 수 있습니다.</p>
+                <div class="progress-bar-container">
+                    <div id="init-progress" class="progress-bar" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- Upload State (Initially Hidden) -->
+            <div id="upload-container" class="state-container hidden">
+                <div class="drop-zone" id="drop-zone">
+                    <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    <h3>MusicXML 또는 MXL 파일 드래그 &amp; 드롭</h3>
+                    <p>또는 컴퓨터에서 파일 선택</p>
+                    <input type="file" id="file-input" accept=".mxl,.xml,.musicxml" hidden>
+                    <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">파일 찾기</button>
+                </div>
+            </div>
+
+            <!-- Processing State -->
+            <div id="processing-container" class="state-container hidden">
+                <div class="processing-animation">
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                </div>
+                <h3>악보 분석 및 운지 표기 계산 중...</h3>
+                <p>HMM Viterbi 디코딩 알고리즘 실행 중입니다. 잠시만 기다려주세요.</p>
+            </div>
+            
+            <!-- Complete State -->
+            <div id="complete-container" class="state-container hidden">
+                <div class="success-icon-wrapper">
+                    <svg class="success-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                </div>
+                <h3>운지 표기 완료!</h3>
+                <p id="result-summary">기타 줄 번호 및 왼손 손가락 번호 표기가 성공적으로 완료되었습니다.</p>
+                <div class="button-group">
+                    <a id="download-link" class="btn btn-success" download>결과 파일 다운로드</a>
+                    <button class="btn btn-outline" onclick="resetApp()">다른 파일 표기하기</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Console Log Panel -->
+        <section class="card glass console-card">
+            <div class="console-header">
+                <span class="dot red"></span>
+                <span class="dot yellow"></span>
+                <span class="dot green"></span>
+                <span class="console-title">시스템 로그 모니터</span>
+            </div>
+            <div class="console-body" id="log-console">
+                <div class="log-line system">[System] 웹 애플리케이션 초기화 시작...</div>
+            </div>
+        </section>
+        
+        <footer class="footer-links">
+            <p>깃허브 저장소 생성 및 배포 가이드는 <a href="git_upload_guide.md" target="_blank">여기(git_upload_guide.md)</a>에서 볼 수 있습니다.</p>
+        </footer>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
