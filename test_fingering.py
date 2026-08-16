@@ -112,5 +112,106 @@ class TestGuitarFingeringHMM(unittest.TestCase):
         # But if we force them to be fretted, they shouldn't stretch.
         pass
 
+    def test_get_default_string(self):
+        from mxl_parser import get_default_string
+        # E2 (40) -> 6
+        self.assertEqual(get_default_string(40), 6)
+        # G#2 (44) -> 6
+        self.assertEqual(get_default_string(44), 6)
+        # A2 (45) -> 5
+        self.assertEqual(get_default_string(45), 5)
+        # C#3 (49) -> 5
+        self.assertEqual(get_default_string(49), 5)
+        # D3 (50) -> 4
+        self.assertEqual(get_default_string(50), 4)
+        # G3 (55) -> 3
+        self.assertEqual(get_default_string(55), 3)
+        # B3 (59) -> 2
+        self.assertEqual(get_default_string(59), 2)
+        # E4 (64) -> 1
+        self.assertEqual(get_default_string(64), 1)
+        # A4 (69) -> 1
+        self.assertEqual(get_default_string(69), 1)
+
+    def test_xml_annotation_omissions(self):
+        from mxl_parser import annotate_xml_content
+        from guitar_hmm import ChordState, NoteState
+        
+        # Create a simple MusicXML content with 3 consecutive identical notes
+        dummy_xml = """<?xml version="1.0" encoding="utf-8"?>
+<score-partwise version="3.0">
+  <part-list>
+    <score-part id="P1">
+      <part-name>Guitar</part-name>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>1</divisions>
+      </attributes>
+      <note>
+        <pitch>
+          <step>C</step>
+          <octave>4</octave>
+        </pitch>
+        <duration>1</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+      </note>
+      <note>
+        <pitch>
+          <step>C</step>
+          <octave>4</octave>
+        </pitch>
+        <duration>1</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+      </note>
+      <note>
+        <pitch>
+          <step>C</step>
+          <octave>4</octave>
+        </pitch>
+        <duration>1</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+      </note>
+    </measure>
+  </part>
+</score-partwise>
+"""
+        # C4 (60) has default string 2.
+        # Let's say all notes are played on string 3 (non-default, fret 5) with finger 3.
+        # optimal_path has 3 steps (at offset 0.0, 1.0, 2.0).
+        state = ChordState([NoteState(3, 5, 3)], 5)
+        optimal_path = [state, state, state]
+        offsets = [0.0, 1.0, 2.0]
+        
+        annotated_xml, annotated_count, total_count = annotate_xml_content(dummy_xml, optimal_path, offsets)
+        
+        # Parse the output XML
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(annotated_xml)
+        notes = root.findall('.//note')
+        
+        # Check first note: should have both string (3) and fingering (3)
+        tech_1 = notes[0].find('.//technical')
+        self.assertIsNotNone(tech_1)
+        self.assertEqual(tech_1.find('string').text, '3')
+        self.assertEqual(tech_1.find('fingering').text, '3')
+        
+        # Check second and third notes: since the chord state is identical (repeated chord),
+        # both string and fingering should be omitted!
+        tech_2 = notes[1].find('.//technical')
+        if tech_2 is not None:
+            self.assertIsNone(tech_2.find('string'))
+            self.assertIsNone(tech_2.find('fingering'))
+            
+        tech_3 = notes[2].find('.//technical')
+        if tech_3 is not None:
+            self.assertIsNone(tech_3.find('string'))
+            self.assertIsNone(tech_3.find('fingering'))
+
 if __name__ == '__main__':
     unittest.main()

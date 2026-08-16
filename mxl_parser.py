@@ -5,6 +5,23 @@ import tempfile
 from music21 import converter
 from guitar_hmm import solve_fingering, TUNING
 
+def get_default_string(pitch):
+    """
+    Get the default guitar string (1 to 6) for a given MIDI pitch in standard first position.
+    """
+    if pitch <= 44:       # E2 to G#2
+        return 6
+    elif 45 <= pitch <= 49: # A2 to C#3
+        return 5
+    elif 50 <= pitch <= 54: # D3 to F#3
+        return 4
+    elif 55 <= pitch <= 58: # G3 to A#3
+        return 3
+    elif 59 <= pitch <= 63: # B3 to D#4
+        return 2
+    else:                  # E4 and above
+        return 1
+
 def extract_note_sequence(score):
     """
     Extract the sequence of pitches (grouped by onset offset) from the first part of the score.
@@ -119,6 +136,10 @@ def annotate_xml_content(xml_string, optimal_path, offsets):
     offset_to_index = {offset: idx for idx, offset in enumerate(offsets)}
     assigned_states_per_step = {idx: set() for idx in range(len(optimal_path))}
     
+    # State tracking to omit redundant / obvious annotations
+    last_string_by_voice = {}
+    last_note_by_voice = {}  # voice -> {'pitch': pitch, 'finger': finger}
+    
     annotated_count = 0
     for note_el, start_time, midi_pitch in xml_notes_with_times:
         matched_idx = None
@@ -139,6 +160,18 @@ def annotate_xml_content(xml_string, optimal_path, offsets):
                     break
             
             if matched_ns:
+                # Find voice of this note
+                voice_el = note_el.find('voice')
+                voice = voice_el.text if voice_el is not None else '1'
+
+                # Check if the entire chord state is repeated from the previous step
+                is_chord_repeated = False
+                if matched_idx > 0:
+                    prev_state = optimal_path[matched_idx - 1]
+                    curr_state = optimal_path[matched_idx]
+                    if prev_state == curr_state:
+                        is_chord_repeated = True
+
                 notations = note_el.find('notations')
                 if notations is None:
                     notations = ET.Element('notations')
@@ -153,15 +186,41 @@ def annotate_xml_content(xml_string, optimal_path, offsets):
                     if child.tag in ['fingering', 'string']:
                         technical.remove(child)
                 
-                if matched_ns.string > 0:
+                # Determine if string number is needed (omit if default/obvious or repeated)
+                need_string = False
+                if matched_ns.string > 0 and matched_ns.fret > 0 and not is_chord_repeated:
+                    default_str = get_default_string(midi_pitch)
+                    # We write the string number if it's NOT the default string for this pitch,
+                    # AND it is different from the last active string in this voice.
+                    if matched_ns.string != default_str:
+                        if last_string_by_voice.get(voice) != matched_ns.string:
+                            need_string = True
+                
+                if need_string:
                     str_el = ET.Element('string')
                     str_el.text = str(matched_ns.string)
                     technical.append(str_el)
+                    last_string_by_voice[voice] = matched_ns.string
+                else:
+                    if matched_ns.string > 0:
+                        last_string_by_voice[voice] = matched_ns.string
                 
-                if matched_ns.finger > 0:
+                # Determine if fingering is needed (omit if repeated)
+                need_finger = False
+                if matched_ns.finger > 0 and not is_chord_repeated:
+                    prev_note = last_note_by_voice.get(voice)
+                    # Omit if it's the exact same pitch and finger as the immediate preceding note in this voice
+                    if prev_note is None or prev_note.get('pitch') != midi_pitch or prev_note.get('finger') != matched_ns.finger:
+                        need_finger = True
+                
+                if need_finger:
                     f_el = ET.Element('fingering')
                     f_el.text = str(matched_ns.finger)
                     technical.append(f_el)
+                    last_note_by_voice[voice] = {'pitch': midi_pitch, 'finger': matched_ns.finger}
+                else:
+                    if matched_ns.finger >= 0:
+                        last_note_by_voice[voice] = {'pitch': midi_pitch, 'finger': matched_ns.finger}
                 
                 annotated_count += 1
 
