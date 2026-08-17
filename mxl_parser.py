@@ -58,9 +58,9 @@ def extract_note_sequence(score_or_part):
         pitches = []
         for el in events[offset]:
             if el.isChord:
-                pitches.extend([int(round(p.ps)) for p in el.pitches])
+                pitches.extend([int(round(p.ps)) - 12 for p in el.pitches])
             else:
-                pitches.append(int(round(el.pitch.ps)))
+                pitches.append(int(round(el.pitch.ps)) - 12)
         note_sequence.append(pitches)
         offset_to_pitches[offset] = pitches
         
@@ -107,7 +107,8 @@ def annotate_single_part_element(part_el, optimal_path, offsets):
                         alter = int(alter_el.text) if alter_el is not None else 0
                         octave = int(pitch_el.find('octave').text)
                         
-                        midi_pitch = 12 * (octave + 1) + {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}[step] + alter
+                        # Guitar is a transposing instrument sounding one octave lower than written
+                        midi_pitch = 12 * (octave + 1) + {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}[step] + alter - 12
                         
                         start_time_quarters = start_time / divisions
                         xml_notes_with_times.append((child, start_time_quarters, midi_pitch))

@@ -181,10 +181,9 @@ class TestGuitarFingeringHMM(unittest.TestCase):
   </part>
 </score-partwise>
 """
-        # C4 (60) has default string 2.
-        # Let's say all notes are played on string 3 (non-default, fret 5) with finger 3.
-        # optimal_path has 3 steps (at offset 0.0, 1.0, 2.0).
-        state = ChordState([NoteState(3, 5, 3)], 5)
+        # C4 (written 60) represents sounding pitch 48 (C3)
+        # Let's say all notes are played on string 6 (non-default, fret 8) with finger 4 in position 5.
+        state = ChordState([NoteState(6, 8, 4)], 5)
         optimal_path = [state, state, state]
         offsets = [0.0, 1.0, 2.0]
         
@@ -195,11 +194,11 @@ class TestGuitarFingeringHMM(unittest.TestCase):
         root = ET.fromstring(annotated_xml)
         notes = root.findall('.//note')
         
-        # Check first note: should have both string (3) and fingering (3)
+        # Check first note: should have both string (6) and fingering (4)
         tech_1 = notes[0].find('.//technical')
         self.assertIsNotNone(tech_1)
-        self.assertEqual(tech_1.find('string').text, '3')
-        self.assertEqual(tech_1.find('fingering').text, '3')
+        self.assertEqual(tech_1.find('string').text, '6')
+        self.assertEqual(tech_1.find('fingering').text, '4')
         
         # Check second and third notes: since the chord state is identical (repeated chord),
         # both string and fingering should be omitted!
@@ -262,10 +261,10 @@ class TestGuitarFingeringHMM(unittest.TestCase):
   </part>
 </score-partwise>
 """
-        # Part 1 (P1): C4 (60) played on string 3 (non-default, fret 5) with finger 3
-        # Part 2 (P2): E4 (64) played on string 2 (non-default, fret 5) with finger 1
-        state_p1 = ChordState([NoteState(3, 5, 3)], 5)
-        state_p2 = ChordState([NoteState(2, 5, 1)], 5)
+        # Part 1 (P1): C4 (written 60, sounding 48) played on string 6 (non-default, fret 8) with finger 4
+        # Part 2 (P2): E4 (written 64, sounding 52) played on string 5 (non-default, fret 7) with finger 3
+        state_p1 = ChordState([NoteState(6, 8, 4)], 5)
+        state_p2 = ChordState([NoteState(5, 7, 3)], 5)
         
         part_results = [
             ('P1', [state_p1], [0.0]),
@@ -285,26 +284,26 @@ class TestGuitarFingeringHMM(unittest.TestCase):
         note_p1 = parts[0].find('.//note')
         tech_p1 = note_p1.find('.//technical')
         self.assertIsNotNone(tech_p1)
-        self.assertEqual(tech_p1.find('string').text, '3')
-        self.assertEqual(tech_p1.find('fingering').text, '3')
+        self.assertEqual(tech_p1.find('string').text, '6')
+        self.assertEqual(tech_p1.find('fingering').text, '4')
         
         # Check Part 2 note
         note_p2 = parts[1].find('.//note')
         tech_p2 = note_p2.find('.//technical')
         self.assertIsNotNone(tech_p2)
-        self.assertEqual(tech_p2.find('string').text, '2')
-        self.assertEqual(tech_p2.find('fingering').text, '1')
+        self.assertEqual(tech_p2.find('string').text, '5')
+        self.assertEqual(tech_p2.find('fingering').text, '3')
 
     def test_obvious_and_persistent_fingerings(self):
         from mxl_parser import annotate_xml_content
         from guitar_hmm import ChordState, NoteState
         
         # We will create a XML content with 5 notes:
-        # Note 1: C4 (midi 60) -> Play pos 1, fret 1, finger 1 (standard 1st position: should be OMITTED)
-        # Note 2: C4 (midi 60) -> Play pos 1, fret 1, finger 1 (repeated: should be OMITTED)
-        # Note 3: C4 (midi 60) -> Play pos 5, fret 5, finger 1 (shifted position: should be PRINTED)
-        # Note 4: C4 (midi 60) -> Play pos 5, fret 5, finger 1 (repeated in pos 5: should be OMITTED)
-        # Note 5: D4 (midi 62) -> Play pos 5, fret 7, finger 3 (different pitch in pos 5: should be PRINTED)
+        # Note 1: C4 (midi 60, sounding 48) -> Play pos 1, fret 3, finger 3 (standard 1st position: should be OMITTED)
+        # Note 2: C4 (midi 60, sounding 48) -> Play pos 1, fret 3, finger 3 (repeated: should be OMITTED)
+        # Note 3: C4 (midi 60, sounding 48) -> Play pos 5, fret 8, finger 4 (shifted position: should be PRINTED)
+        # Note 4: C4 (midi 60, sounding 48) -> Play pos 5, fret 8, finger 4 (repeated in pos 5: should be OMITTED)
+        # Note 5: D4 (midi 62, sounding 50) -> Play pos 5, fret 5, finger 1 (different pitch in pos 5: should be PRINTED)
         dummy_xml = """<?xml version="1.0" encoding="utf-8"?>
 <score-partwise version="3.0">
   <part-list>
@@ -347,11 +346,11 @@ class TestGuitarFingeringHMM(unittest.TestCase):
   </part>
 </score-partwise>
 """
-        state_1 = ChordState([NoteState(2, 1, 1)], 1) # C4, string 2, fret 1, finger 1, pos 1
-        state_2 = ChordState([NoteState(2, 1, 1)], 1) # C4, string 2, fret 1, finger 1, pos 1
-        state_3 = ChordState([NoteState(3, 5, 1)], 5) # C4, string 3, fret 5, finger 1, pos 5
-        state_4 = ChordState([NoteState(3, 5, 1)], 5) # C4, string 3, fret 5, finger 1, pos 5
-        state_5 = ChordState([NoteState(3, 7, 3)], 5) # D4, string 3, fret 7, finger 3, pos 5
+        state_1 = ChordState([NoteState(5, 3, 3)], 1) # C3 (48), string 5, fret 3, finger 3, pos 1
+        state_2 = ChordState([NoteState(5, 3, 3)], 1) # C3 (48), string 5, fret 3, finger 3, pos 1
+        state_3 = ChordState([NoteState(6, 8, 4)], 5) # C3 (48), string 6, fret 8, finger 4, pos 5
+        state_4 = ChordState([NoteState(6, 8, 4)], 5) # C3 (48), string 6, fret 8, finger 4, pos 5
+        state_5 = ChordState([NoteState(5, 5, 1)], 5) # D3 (50), string 5, fret 5, finger 1, pos 5
         
         optimal_path = [state_1, state_2, state_3, state_4, state_5]
         offsets = [0.0, 1.0, 2.0, 3.0, 4.0]
@@ -372,20 +371,20 @@ class TestGuitarFingeringHMM(unittest.TestCase):
         if tech_2 is not None:
             self.assertIsNone(tech_2.find('fingering'))
             
-        # Note 3: Position shifted to 5 -> fingering printed (1)
+        # Note 3: Position shifted to 5 -> fingering printed (4)
         tech_3 = notes[2].find('.//technical')
         self.assertIsNotNone(tech_3)
-        self.assertEqual(tech_3.find('fingering').text, '1')
+        self.assertEqual(tech_3.find('fingering').text, '4')
         
         # Note 4: Repeated in pos 5 -> fingering omitted
         tech_4 = notes[3].find('.//technical')
         if tech_4 is not None:
             self.assertIsNone(tech_4.find('fingering'))
             
-        # Note 5: Different pitch in pos 5 -> fingering printed (3)
+        # Note 5: Different pitch in pos 5 -> fingering printed (1)
         tech_5 = notes[4].find('.//technical')
         self.assertIsNotNone(tech_5)
-        self.assertEqual(tech_5.find('fingering').text, '3')
+        self.assertEqual(tech_5.find('fingering').text, '1')
 
 if __name__ == '__main__':
     unittest.main()
