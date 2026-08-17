@@ -22,6 +22,27 @@ def get_default_string(pitch):
     else:                  # E4 and above
         return 1
 
+def determine_transposition(part):
+    # Extract all music21 pitches (without transposition)
+    pitches = []
+    for el in part.flatten().notes:
+        if el.isChord:
+            pitches.extend([int(round(p.ps)) for p in el.pitches])
+        else:
+            pitches.append(int(round(el.pitch.ps)))
+    if not pitches:
+        return 0
+    min_pitch = min(pitches)
+    # If the lowest pitch is already below 38, it must be sounding pitch
+    if min_pitch < 38:
+        return 0
+    # Check how many notes would become unplayable (below 38) if we transposed by -12
+    unplayable_count = sum(1 for p in pitches if p - 12 < 38)
+    if unplayable_count > 0:
+        return 0
+    else:
+        return -12
+
 def extract_note_sequence(score_or_part):
     """
     Extract the sequence of pitches (grouped by onset offset).
@@ -51,6 +72,9 @@ def extract_note_sequence(score_or_part):
         
     sorted_offsets = sorted(events.keys())
     
+    # Determine transposition dynamically
+    transpose = determine_transposition(part)
+    
     note_sequence = []
     offset_to_pitches = {}
     
@@ -58,15 +82,15 @@ def extract_note_sequence(score_or_part):
         pitches = []
         for el in events[offset]:
             if el.isChord:
-                pitches.extend([int(round(p.ps)) - 12 for p in el.pitches])
+                pitches.extend([int(round(p.ps)) + transpose for p in el.pitches])
             else:
-                pitches.append(int(round(el.pitch.ps)) - 12)
+                pitches.append(int(round(el.pitch.ps)) + transpose)
         note_sequence.append(pitches)
         offset_to_pitches[offset] = pitches
         
-    return note_sequence, sorted_offsets
+    return note_sequence, sorted_offsets, transpose
 
-def annotate_single_part_element(part_el, optimal_path, offsets):
+def annotate_single_part_element(part_el, optimal_path, offsets, transpose=-12):
     """
     Track timeline, align and annotate notes within a single XML part element.
     """
@@ -107,8 +131,8 @@ def annotate_single_part_element(part_el, optimal_path, offsets):
                         alter = int(alter_el.text) if alter_el is not None else 0
                         octave = int(pitch_el.find('octave').text)
                         
-                        # Guitar is a transposing instrument sounding one octave lower than written
-                        midi_pitch = 12 * (octave + 1) + {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}[step] + alter - 12
+                        # Get written MIDI pitch from XML
+                        midi_pitch = 12 * (octave + 1) + {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}[step] + alter
                         
                         start_time_quarters = start_time / divisions
                         xml_notes_with_times.append((child, start_time_quarters, midi_pitch))
@@ -140,13 +164,14 @@ def annotate_single_part_element(part_el, optimal_path, offsets):
         
         if matched_idx is not None:
             chord_state = optimal_path[matched_idx]
+            xml_sounding_pitch = midi_pitch + transpose
             
             # Find matching note state
             matched_ns = None
             # Pass 1: Try to find an unassigned note state
             for ns in chord_state.note_states:
                 ns_pitch = TUNING[ns.string] + ns.fret
-                if ns_pitch == midi_pitch and ns not in assigned_states_per_step[matched_idx]:
+                if ns_pitch == xml_sounding_pitch and ns not in assigned_states_per_step[matched_idx]:
                     matched_ns = ns
                     assigned_states_per_step[matched_idx].add(ns)
                     break
@@ -155,7 +180,7 @@ def annotate_single_part_element(part_el, optimal_path, offsets):
             if matched_ns is None:
                 for ns in chord_state.note_states:
                     ns_pitch = TUNING[ns.string] + ns.fret
-                    if ns_pitch == midi_pitch:
+                    if ns_pitch == xml_sounding_pitch:
                         matched_ns = ns
                         break
             
@@ -221,8 +246,15 @@ def annotate_xml_content(xml_string, part_results_or_path, offsets=None):
     if not xml_parts:
         return xml_string, 0, 0
     
-    results_by_id = {pid: (path, offsets) for pid, path, offsets in part_results}
-    
+    results_by_id = {}
+    for item in part_results:
+        if len(item) == 4:
+            pid, path, offsets, transpose = item
+            results_by_id[pid] = (path, offsets, transpose)
+        else:
+            pid, path, offsets = item
+            results_by_id[pid] = (path, offsets, -12)
+            
     total_annotated = 0
     total_notes = 0
     
@@ -230,12 +262,16 @@ def annotate_xml_content(xml_string, part_results_or_path, offsets=None):
         part_id = part_el.get('id')
         matched_result = results_by_id.get(part_id)
         if matched_result is None and idx < len(part_results):
-            matched_result = (part_results[idx][1], part_results[idx][2])
+            r = part_results[idx]
+            if len(r) == 4:
+                matched_result = (r[1], r[2], r[3])
+            else:
+                matched_result = (r[1], r[2], -12)
             
         if matched_result:
-            optimal_path, offsets = matched_result
+            optimal_path, offsets, transpose = matched_result
             print(f"[XML Parser] Annotating part {part_id if part_id else idx+1}...")
-            annotated_count, part_note_count = annotate_single_part_element(part_el, optimal_path, offsets)
+            annotated_count, part_note_count = annotate_single_part_element(part_el, optimal_path, offsets, transpose)
             print(f"[XML Parser] Part {part_id if part_id else idx+1}: annotated {annotated_count} / {part_note_count} notes.")
             total_annotated += annotated_count
             total_notes += part_note_count
@@ -276,10 +312,10 @@ def annotate_mxl(input_path, output_path):
     part_results = []
     for idx, part in enumerate(parts):
         print(f"[MXL Parser] Processing Part {idx+1} (ID: {part.id})...")
-        note_sequence, offsets = extract_note_sequence(part)
+        note_sequence, offsets, transpose = extract_note_sequence(part)
         print(f"[MXL Parser] Solving guitar fingerings using HMM (length={len(note_sequence)})...")
         optimal_path = solve_fingering(note_sequence)
-        part_results.append((part.id, optimal_path, offsets))
+        part_results.append((part.id, optimal_path, offsets, transpose))
     
     # Export the score to temporary MusicXML
     print("[MXL Parser] Exporting temporary score...")
