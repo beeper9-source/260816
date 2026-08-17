@@ -28,7 +28,7 @@ document.addEventListener("DOMContentLoaded", () => {
 // Create and initialize Pyodide Web Worker
 function initWorker() {
     log("System", "Web Worker 인스턴스 생성 중...");
-    worker = new Worker("pyodide_worker.js");
+    worker = new Worker("pyodide_worker.js?v=" + new Date().getTime());
 
     worker.onmessage = (event) => {
         const { type, data } = event.data;
