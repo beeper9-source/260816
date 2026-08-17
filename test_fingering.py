@@ -213,5 +213,179 @@ class TestGuitarFingeringHMM(unittest.TestCase):
             self.assertIsNone(tech_3.find('string'))
             self.assertIsNone(tech_3.find('fingering'))
 
+    def test_xml_annotation_multi_part(self):
+        from mxl_parser import annotate_xml_content
+        from guitar_hmm import ChordState, NoteState
+        
+        # Create a simple multi-part MusicXML content with Part P1 and Part P2
+        dummy_xml = """<?xml version="1.0" encoding="utf-8"?>
+<score-partwise version="3.0">
+  <part-list>
+    <score-part id="P1">
+      <part-name>Guitar 1</part-name>
+    </score-part>
+    <score-part id="P2">
+      <part-name>Guitar 2</part-name>
+    </score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>1</divisions>
+      </attributes>
+      <note>
+        <pitch>
+          <step>C</step>
+          <octave>4</octave>
+        </pitch>
+        <duration>1</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+      </note>
+    </measure>
+  </part>
+  <part id="P2">
+    <measure number="1">
+      <attributes>
+        <divisions>1</divisions>
+      </attributes>
+      <note>
+        <pitch>
+          <step>E</step>
+          <octave>4</octave>
+        </pitch>
+        <duration>1</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+      </note>
+    </measure>
+  </part>
+</score-partwise>
+"""
+        # Part 1 (P1): C4 (60) played on string 3 (non-default, fret 5) with finger 3
+        # Part 2 (P2): E4 (64) played on string 2 (non-default, fret 5) with finger 1
+        state_p1 = ChordState([NoteState(3, 5, 3)], 5)
+        state_p2 = ChordState([NoteState(2, 5, 1)], 5)
+        
+        part_results = [
+            ('P1', [state_p1], [0.0]),
+            ('P2', [state_p2], [0.0])
+        ]
+        
+        annotated_xml, annotated_count, total_count = annotate_xml_content(dummy_xml, part_results)
+        
+        self.assertEqual(annotated_count, 2)
+        self.assertEqual(total_count, 2)
+        
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(annotated_xml)
+        parts = root.findall('.//part')
+        
+        # Check Part 1 note
+        note_p1 = parts[0].find('.//note')
+        tech_p1 = note_p1.find('.//technical')
+        self.assertIsNotNone(tech_p1)
+        self.assertEqual(tech_p1.find('string').text, '3')
+        self.assertEqual(tech_p1.find('fingering').text, '3')
+        
+        # Check Part 2 note
+        note_p2 = parts[1].find('.//note')
+        tech_p2 = note_p2.find('.//technical')
+        self.assertIsNotNone(tech_p2)
+        self.assertEqual(tech_p2.find('string').text, '2')
+        self.assertEqual(tech_p2.find('fingering').text, '1')
+
+    def test_obvious_and_persistent_fingerings(self):
+        from mxl_parser import annotate_xml_content
+        from guitar_hmm import ChordState, NoteState
+        
+        # We will create a XML content with 5 notes:
+        # Note 1: C4 (midi 60) -> Play pos 1, fret 1, finger 1 (standard 1st position: should be OMITTED)
+        # Note 2: C4 (midi 60) -> Play pos 1, fret 1, finger 1 (repeated: should be OMITTED)
+        # Note 3: C4 (midi 60) -> Play pos 5, fret 5, finger 1 (shifted position: should be PRINTED)
+        # Note 4: C4 (midi 60) -> Play pos 5, fret 5, finger 1 (repeated in pos 5: should be OMITTED)
+        # Note 5: D4 (midi 62) -> Play pos 5, fret 7, finger 3 (different pitch in pos 5: should be PRINTED)
+        dummy_xml = """<?xml version="1.0" encoding="utf-8"?>
+<score-partwise version="3.0">
+  <part-list>
+    <score-part id="P1"><part-name>Guitar</part-name></score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes><divisions>1</divisions></attributes>
+      <note>
+        <pitch><step>C</step><octave>4</octave></pitch>
+        <duration>1</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+      </note>
+      <note>
+        <pitch><step>C</step><octave>4</octave></pitch>
+        <duration>1</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+      </note>
+      <note>
+        <pitch><step>C</step><octave>4</octave></pitch>
+        <duration>1</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+      </note>
+      <note>
+        <pitch><step>C</step><octave>4</octave></pitch>
+        <duration>1</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+      </note>
+      <note>
+        <pitch><step>D</step><octave>4</octave></pitch>
+        <duration>1</duration>
+        <voice>1</voice>
+        <type>quarter</type>
+      </note>
+    </measure>
+  </part>
+</score-partwise>
+"""
+        state_1 = ChordState([NoteState(2, 1, 1)], 1) # C4, string 2, fret 1, finger 1, pos 1
+        state_2 = ChordState([NoteState(2, 1, 1)], 1) # C4, string 2, fret 1, finger 1, pos 1
+        state_3 = ChordState([NoteState(3, 5, 1)], 5) # C4, string 3, fret 5, finger 1, pos 5
+        state_4 = ChordState([NoteState(3, 5, 1)], 5) # C4, string 3, fret 5, finger 1, pos 5
+        state_5 = ChordState([NoteState(3, 7, 3)], 5) # D4, string 3, fret 7, finger 3, pos 5
+        
+        optimal_path = [state_1, state_2, state_3, state_4, state_5]
+        offsets = [0.0, 1.0, 2.0, 3.0, 4.0]
+        
+        annotated_xml, annotated_count, total_count = annotate_xml_content(dummy_xml, optimal_path, offsets)
+        
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(annotated_xml)
+        notes = root.findall('.//note')
+        
+        # Note 1: Standard 1st position finger == fret -> fingering omitted
+        tech_1 = notes[0].find('.//technical')
+        if tech_1 is not None:
+            self.assertIsNone(tech_1.find('fingering'))
+            
+        # Note 2: Repeated standard -> fingering omitted
+        tech_2 = notes[1].find('.//technical')
+        if tech_2 is not None:
+            self.assertIsNone(tech_2.find('fingering'))
+            
+        # Note 3: Position shifted to 5 -> fingering printed (1)
+        tech_3 = notes[2].find('.//technical')
+        self.assertIsNotNone(tech_3)
+        self.assertEqual(tech_3.find('fingering').text, '1')
+        
+        # Note 4: Repeated in pos 5 -> fingering omitted
+        tech_4 = notes[3].find('.//technical')
+        if tech_4 is not None:
+            self.assertIsNone(tech_4.find('fingering'))
+            
+        # Note 5: Different pitch in pos 5 -> fingering printed (3)
+        tech_5 = notes[4].find('.//technical')
+        self.assertIsNotNone(tech_5)
+        self.assertEqual(tech_5.find('fingering').text, '3')
+
 if __name__ == '__main__':
     unittest.main()

@@ -22,16 +22,20 @@ def get_default_string(pitch):
     else:                  # E4 and above
         return 1
 
-def extract_note_sequence(score):
+def extract_note_sequence(score_or_part):
     """
-    Extract the sequence of pitches (grouped by onset offset) from the first part of the score.
+    Extract the sequence of pitches (grouped by onset offset).
+    Can take a music21 Score or Part.
     """
-    # Use the first part of the score
-    parts = list(score.parts)
-    if not parts:
-        raise ValueError("The MusicXML file does not contain any parts.")
-    
-    part = parts[0]
+    if hasattr(score_or_part, 'parts'):
+        # If it's a Score, use the first part
+        parts = list(score_or_part.parts)
+        if not parts:
+            raise ValueError("The MusicXML file does not contain any parts.")
+        part = parts[0]
+    else:
+        part = score_or_part
+        
     notes_and_chords = list(part.flatten().notes)
     
     # Group notes/chords by offset
@@ -62,24 +66,16 @@ def extract_note_sequence(score):
         
     return note_sequence, sorted_offsets
 
-def annotate_xml_content(xml_string, optimal_path, offsets):
+def annotate_single_part_element(part_el, optimal_path, offsets):
     """
-    Parse XML content and inject fingering and string annotations by tracking the timeline.
+    Track timeline, align and annotate notes within a single XML part element.
     """
-    root = ET.fromstring(xml_string)
-    
-    parts = root.findall('.//part')
-    if not parts:
-        return xml_string
-    
-    part = parts[0]
-    
-    # 1. Track timeline of all notes in the MusicXML
+    # 1. Track timeline of all notes in this XML part
     current_time = 0  # in divisions
     divisions = 1
     xml_notes_with_times = []  # list of (note_element, start_time_quarters, midi_pitch)
     
-    for measure in part.findall('measure'):
+    for measure in part_el.findall('measure'):
         attr = measure.find('attributes')
         if attr is not None:
             div_el = attr.find('divisions')
@@ -129,16 +125,14 @@ def annotate_xml_content(xml_string, optimal_path, offsets):
                 duration = int(dur_el.text) if dur_el is not None else 0
                 current_time += duration
 
-    print(f"[XML Parser] XML note elements detected: {len(xml_notes_with_times)}")
-    print(f"[XML Parser] HMM optimal path steps: {len(optimal_path)}")
-    
     # 2. Align and annotate notes
     offset_to_index = {offset: idx for idx, offset in enumerate(offsets)}
     assigned_states_per_step = {idx: set() for idx in range(len(optimal_path))}
     
     # State tracking to omit redundant / obvious annotations
     last_string_by_voice = {}
-    last_note_by_voice = {}  # voice -> {'pitch': pitch, 'finger': finger}
+    last_fingering_by_voice_and_pitch = {}
+    last_position_by_voice = {}
     
     annotated_count = 0
     for note_el, start_time, midi_pitch in xml_notes_with_times:
@@ -163,6 +157,14 @@ def annotate_xml_content(xml_string, optimal_path, offsets):
                 # Find voice of this note
                 voice_el = note_el.find('voice')
                 voice = voice_el.text if voice_el is not None else '1'
+
+                # Reset persistent fingering tracking for this voice if position shifted
+                current_position = chord_state.position
+                if last_position_by_voice.get(voice) != current_position:
+                    keys_to_remove = [k for k in last_fingering_by_voice_and_pitch if k[0] == voice]
+                    for k in keys_to_remove:
+                        del last_fingering_by_voice_and_pitch[k]
+                    last_position_by_voice[voice] = current_position
 
                 # Check if the entire chord state is repeated from the previous step
                 is_chord_repeated = False
@@ -205,30 +207,72 @@ def annotate_xml_content(xml_string, optimal_path, offsets):
                     if matched_ns.string > 0:
                         last_string_by_voice[voice] = matched_ns.string
                 
-                # Determine if fingering is needed (omit if repeated)
+                # Determine if fingering is needed (omit if open string, standard 1st position fingering, or repeated)
                 need_finger = False
                 if matched_ns.finger > 0 and not is_chord_repeated:
-                    prev_note = last_note_by_voice.get(voice)
-                    # Omit if it's the exact same pitch and finger as the immediate preceding note in this voice
-                    if prev_note is None or prev_note.get('pitch') != midi_pitch or prev_note.get('finger') != matched_ns.finger:
-                        need_finger = True
+                    # Omit standard first-position fingerings (e.g. finger == fret in position 1)
+                    is_standard_first_position = (current_position == 1 and matched_ns.finger == matched_ns.fret)
+                    if not is_standard_first_position:
+                        # Omit if it matches the last annotated fingering for this pitch in this voice
+                        prev_finger = last_fingering_by_voice_and_pitch.get((voice, midi_pitch))
+                        if prev_finger != matched_ns.finger:
+                            need_finger = True
                 
                 if need_finger:
                     f_el = ET.Element('fingering')
                     f_el.text = str(matched_ns.finger)
                     technical.append(f_el)
-                    last_note_by_voice[voice] = {'pitch': midi_pitch, 'finger': matched_ns.finger}
+                    last_fingering_by_voice_and_pitch[(voice, midi_pitch)] = matched_ns.finger
                 else:
-                    if matched_ns.finger >= 0:
-                        last_note_by_voice[voice] = {'pitch': midi_pitch, 'finger': matched_ns.finger}
+                    if matched_ns.finger > 0:
+                        last_fingering_by_voice_and_pitch[(voice, midi_pitch)] = matched_ns.finger
                 
                 annotated_count += 1
+                
+    return annotated_count, len(xml_notes_with_times)
 
-    print(f"[XML Parser] Successfully annotated {annotated_count} / {len(xml_notes_with_times)} notes.")
+def annotate_xml_content(xml_string, part_results_or_path, offsets=None):
+    """
+    Parse XML content and inject fingering and string annotations.
+    Supports:
+      - annotate_xml_content(xml_string, part_results)
+      - annotate_xml_content(xml_string, optimal_path, offsets) [backward compatibility]
+    """
+    if offsets is not None:
+        part_results = [('P1', part_results_or_path, offsets)]
+    else:
+        part_results = part_results_or_path
+        
+    root = ET.fromstring(xml_string)
+    
+    xml_parts = root.findall('.//part')
+    if not xml_parts:
+        return xml_string, 0, 0
+    
+    results_by_id = {pid: (path, offsets) for pid, path, offsets in part_results}
+    
+    total_annotated = 0
+    total_notes = 0
+    
+    for idx, part_el in enumerate(xml_parts):
+        part_id = part_el.get('id')
+        matched_result = results_by_id.get(part_id)
+        if matched_result is None and idx < len(part_results):
+            matched_result = (part_results[idx][1], part_results[idx][2])
+            
+        if matched_result:
+            optimal_path, offsets = matched_result
+            print(f"[XML Parser] Annotating part {part_id if part_id else idx+1}...")
+            annotated_count, part_note_count = annotate_single_part_element(part_el, optimal_path, offsets)
+            print(f"[XML Parser] Part {part_id if part_id else idx+1}: annotated {annotated_count} / {part_note_count} notes.")
+            total_annotated += annotated_count
+            total_notes += part_note_count
+            
+    print(f"[XML Parser] Successfully annotated {total_annotated} / {total_notes} notes total.")
     
     annotated_xml = ET.tostring(root, encoding='utf-8')
     xml_bytes = b'<?xml version="1.0" encoding="utf-8"?>\n' + annotated_xml
-    return xml_bytes, annotated_count, len(xml_notes_with_times)
+    return xml_bytes, total_annotated, total_notes
 
 def create_mxl_file(xml_content, output_path):
     """
@@ -254,11 +298,16 @@ def annotate_mxl(input_path, output_path):
     print(f"[MXL Parser] Loading file: {input_path}")
     score = converter.parse(input_path)
     
-    print("[MXL Parser] Extracting note sequence...")
-    note_sequence, offsets = extract_note_sequence(score)
+    parts = list(score.parts)
+    print(f"[MXL Parser] Number of parts detected: {len(parts)}")
     
-    print(f"[MXL Parser] Solving guitar fingerings using HMM (length={len(note_sequence)})...")
-    optimal_path = solve_fingering(note_sequence)
+    part_results = []
+    for idx, part in enumerate(parts):
+        print(f"[MXL Parser] Processing Part {idx+1} (ID: {part.id})...")
+        note_sequence, offsets = extract_note_sequence(part)
+        print(f"[MXL Parser] Solving guitar fingerings using HMM (length={len(note_sequence)})...")
+        optimal_path = solve_fingering(note_sequence)
+        part_results.append((part.id, optimal_path, offsets))
     
     # Export the score to temporary MusicXML
     print("[MXL Parser] Exporting temporary score...")
@@ -271,7 +320,7 @@ def annotate_mxl(input_path, output_path):
             xml_content = f.read()
             
         print("[MXL Parser] Injecting fingering and string annotations into XML...")
-        annotated_xml_content, annotated, total = annotate_xml_content(xml_content, optimal_path, offsets)
+        annotated_xml_content, annotated, total = annotate_xml_content(xml_content, part_results)
         
         # Write output file
         if output_path.lower().endswith('.mxl'):
