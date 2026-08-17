@@ -211,6 +211,9 @@ def calculate_state_cost(state):
     if len(state.note_states) > 1:
         cost += 0.4 * len(state.note_states)
 
+    # 4. Position penalty (strongly prefer lower positions, especially first position)
+    cost += 0.05 * (state.position - 1)
+
     return cost
 
 
