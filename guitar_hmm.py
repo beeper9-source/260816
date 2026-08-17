@@ -17,8 +17,8 @@ class NoteState:
         self.fret = fret         # 0 to 19
         self.finger = finger     # 0 (open), 1 (index), 2 (middle), 3 (ring), 4 (little)
         
-        if fret > 0:
-            self.position = fret - finger + 1
+        if fret > 0 and position is None:
+            self.position = max(1, fret - finger + 1)
         else:
             self.position = position if position is not None else 1
 
@@ -68,9 +68,7 @@ def get_possible_note_states(pitch):
                 states.append(NoteState(string, 0, 0, None))
             else:
                 for finger in [1, 2, 3, 4]:
-                    pos = fret - finger + 1
-                    if pos >= 1: # Position must be a valid fret number >= 1
-                        states.append(NoteState(string, fret, finger))
+                    states.append(NoteState(string, fret, finger))
     return states
 
 
@@ -155,22 +153,24 @@ def get_possible_chord_states(pitches):
             # Find hand position of the fretted notes
             fretted_positions = [ns.position for ns in current_states if ns.fret > 0]
             if fretted_positions:
-                if len(set(fretted_positions)) > 1:
-                    # In a chord, all fretted notes must share the same hand position
+                min_pos = min(fretted_positions)
+                max_pos = max(fretted_positions)
+                if max_pos - min_pos > 1:
+                    # Allow suggested positions to differ by at most 1 fret
                     return
-                pos = fretted_positions[0]
+                pos = min_pos
             else:
                 pos = None
 
             if is_valid_chord_combination(current_states):
                 if pos is not None:
-                    # Update open notes in the chord to have the same position
+                    # Update all notes in the chord to have the same position
                     final_states = []
                     for ns in current_states:
                         if ns.fret == 0:
                             final_states.append(NoteState(ns.string, 0, 0, pos))
                         else:
-                            final_states.append(ns)
+                            final_states.append(NoteState(ns.string, ns.fret, ns.finger, pos))
                     valid_chords.append(ChordState(final_states, pos))
                 else:
                     # Only open strings: generate for all possible positions 1 to 15
@@ -213,6 +213,26 @@ def calculate_state_cost(state):
 
     # 4. Position penalty (strongly prefer lower positions, especially first position)
     cost += 0.05 * (state.position - 1)
+
+    # 5. Hand comfort / posture penalties
+    fretted = [ns for ns in state.note_states if ns.fret > 0]
+    for i in range(len(fretted)):
+        for j in range(i + 1, len(fretted)):
+            ns_a = fretted[i]
+            ns_b = fretted[j]
+            
+            # (a) Backward stretch penalty (higher finger on lower fret)
+            if ns_a.finger < ns_b.finger and ns_a.fret > ns_b.fret:
+                cost += 0.5
+            elif ns_b.finger < ns_a.finger and ns_b.fret > ns_a.fret:
+                cost += 0.5
+                
+            # (b) Vertical crossing penalty (higher finger on lower-pitched string for same fret)
+            if ns_a.fret == ns_b.fret:
+                if ns_a.string > ns_b.string and ns_a.finger > ns_b.finger:
+                    cost += 0.5
+                elif ns_b.string > ns_a.string and ns_b.finger > ns_a.finger:
+                    cost += 0.5
 
     return cost
 
