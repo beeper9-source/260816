@@ -201,16 +201,16 @@ class TestGuitarFingeringHMM(unittest.TestCase):
         self.assertEqual(tech_1.find('fingering').text, '4')
         
         # Check second and third notes: since the chord state is identical (repeated chord),
-        # both string and fingering should be omitted!
+        # string is omitted but fingering is always printed!
         tech_2 = notes[1].find('.//technical')
-        if tech_2 is not None:
-            self.assertIsNone(tech_2.find('string'))
-            self.assertIsNone(tech_2.find('fingering'))
+        self.assertIsNotNone(tech_2)
+        self.assertIsNone(tech_2.find('string'))
+        self.assertEqual(tech_2.find('fingering').text, '4')
             
         tech_3 = notes[2].find('.//technical')
-        if tech_3 is not None:
-            self.assertIsNone(tech_3.find('string'))
-            self.assertIsNone(tech_3.find('fingering'))
+        self.assertIsNotNone(tech_3)
+        self.assertIsNone(tech_3.find('string'))
+        self.assertEqual(tech_3.find('fingering').text, '4')
 
     def test_xml_annotation_multi_part(self):
         from mxl_parser import annotate_xml_content
@@ -361,25 +361,25 @@ class TestGuitarFingeringHMM(unittest.TestCase):
         root = ET.fromstring(annotated_xml)
         notes = root.findall('.//note')
         
-        # Note 1: Standard 1st position finger == fret -> fingering omitted
+        # Note 1: Standard 1st position fingering is always printed (3)
         tech_1 = notes[0].find('.//technical')
-        if tech_1 is not None:
-            self.assertIsNone(tech_1.find('fingering'))
+        self.assertIsNotNone(tech_1)
+        self.assertEqual(tech_1.find('fingering').text, '3')
             
-        # Note 2: Repeated standard -> fingering omitted
+        # Note 2: Repeated standard fingering is printed (3)
         tech_2 = notes[1].find('.//technical')
-        if tech_2 is not None:
-            self.assertIsNone(tech_2.find('fingering'))
+        self.assertIsNotNone(tech_2)
+        self.assertEqual(tech_2.find('fingering').text, '3')
             
         # Note 3: Position shifted to 5 -> fingering printed (4)
         tech_3 = notes[2].find('.//technical')
         self.assertIsNotNone(tech_3)
         self.assertEqual(tech_3.find('fingering').text, '4')
         
-        # Note 4: Repeated in pos 5 -> fingering omitted
+        # Note 4: Repeated in pos 5 -> fingering printed (4)
         tech_4 = notes[3].find('.//technical')
-        if tech_4 is not None:
-            self.assertIsNone(tech_4.find('fingering'))
+        self.assertIsNotNone(tech_4)
+        self.assertEqual(tech_4.find('fingering').text, '4')
             
         # Note 5: Different pitch in pos 5 -> fingering printed (1)
         tech_5 = notes[4].find('.//technical')

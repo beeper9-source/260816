@@ -194,17 +194,10 @@ def annotate_single_part_element(part_el, optimal_path, offsets):
                     str_el.text = str(matched_ns.string)
                     technical.append(str_el)
                 
-                # Determine if fingering is needed (omit if open string, standard 1st position fingering, or repeated)
-                need_finger = False
-                if matched_ns.finger > 0 and not is_chord_repeated:
-                    is_standard_first_position = (chord_state.position == 1 and matched_ns.finger == matched_ns.fret)
-                    if not is_standard_first_position:
-                        need_finger = True
-                
-                if need_finger:
-                    f_el = ET.Element('fingering')
-                    f_el.text = str(matched_ns.finger)
-                    technical.append(f_el)
+                # Always print the fingering
+                f_el = ET.Element('fingering')
+                f_el.text = str(matched_ns.finger)
+                technical.append(f_el)
                 
                 annotated_count += 1
                 
