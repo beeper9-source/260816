@@ -130,11 +130,6 @@ def annotate_single_part_element(part_el, optimal_path, offsets):
     offset_to_index = {offset: idx for idx, offset in enumerate(offsets)}
     assigned_states_per_step = {idx: set() for idx in range(len(optimal_path))}
     
-    # State tracking to omit redundant / obvious annotations
-    last_string_by_voice = {}
-    last_fingering_by_voice_and_pitch = {}
-    last_position_by_voice = {}
-    
     annotated_count = 0
     for note_el, start_time, midi_pitch in xml_notes_with_times:
         matched_idx = None
@@ -146,7 +141,9 @@ def annotate_single_part_element(part_el, optimal_path, offsets):
         if matched_idx is not None:
             chord_state = optimal_path[matched_idx]
             
+            # Find matching note state
             matched_ns = None
+            # Pass 1: Try to find an unassigned note state
             for ns in chord_state.note_states:
                 ns_pitch = TUNING[ns.string] + ns.fret
                 if ns_pitch == midi_pitch and ns not in assigned_states_per_step[matched_idx]:
@@ -154,19 +151,15 @@ def annotate_single_part_element(part_el, optimal_path, offsets):
                     assigned_states_per_step[matched_idx].add(ns)
                     break
             
+            # Pass 2: Fallback to duplicate matching if no unassigned note state of the same pitch is found
+            if matched_ns is None:
+                for ns in chord_state.note_states:
+                    ns_pitch = TUNING[ns.string] + ns.fret
+                    if ns_pitch == midi_pitch:
+                        matched_ns = ns
+                        break
+            
             if matched_ns:
-                # Find voice of this note
-                voice_el = note_el.find('voice')
-                voice = voice_el.text if voice_el is not None else '1'
-
-                # Reset persistent fingering tracking for this voice if position shifted
-                current_position = chord_state.position
-                if last_position_by_voice.get(voice) != current_position:
-                    keys_to_remove = [k for k in last_fingering_by_voice_and_pitch if k[0] == voice]
-                    for k in keys_to_remove:
-                        del last_fingering_by_voice_and_pitch[k]
-                    last_position_by_voice[voice] = current_position
-
                 # Check if the entire chord state is repeated from the previous step
                 is_chord_repeated = False
                 if matched_idx > 0:
@@ -193,40 +186,25 @@ def annotate_single_part_element(part_el, optimal_path, offsets):
                 need_string = False
                 if matched_ns.string > 0 and matched_ns.fret > 0 and not is_chord_repeated:
                     default_str = get_default_string(midi_pitch)
-                    # We write the string number if it's NOT the default string for this pitch,
-                    # AND it is different from the last active string in this voice.
                     if matched_ns.string != default_str:
-                        if last_string_by_voice.get(voice) != matched_ns.string:
-                            need_string = True
+                        need_string = True
                 
                 if need_string:
                     str_el = ET.Element('string')
                     str_el.text = str(matched_ns.string)
                     technical.append(str_el)
-                    last_string_by_voice[voice] = matched_ns.string
-                else:
-                    if matched_ns.string > 0:
-                        last_string_by_voice[voice] = matched_ns.string
                 
                 # Determine if fingering is needed (omit if open string, standard 1st position fingering, or repeated)
                 need_finger = False
                 if matched_ns.finger > 0 and not is_chord_repeated:
-                    # Omit standard first-position fingerings (e.g. finger == fret in position 1)
-                    is_standard_first_position = (current_position == 1 and matched_ns.finger == matched_ns.fret)
+                    is_standard_first_position = (chord_state.position == 1 and matched_ns.finger == matched_ns.fret)
                     if not is_standard_first_position:
-                        # Omit if it matches the last annotated fingering for this pitch in this voice
-                        prev_finger = last_fingering_by_voice_and_pitch.get((voice, midi_pitch))
-                        if prev_finger != matched_ns.finger:
-                            need_finger = True
+                        need_finger = True
                 
                 if need_finger:
                     f_el = ET.Element('fingering')
                     f_el.text = str(matched_ns.finger)
                     technical.append(f_el)
-                    last_fingering_by_voice_and_pitch[(voice, midi_pitch)] = matched_ns.finger
-                else:
-                    if matched_ns.finger > 0:
-                        last_fingering_by_voice_and_pitch[(voice, midi_pitch)] = matched_ns.finger
                 
                 annotated_count += 1
                 
