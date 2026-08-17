@@ -41,12 +41,13 @@ async function initPyodide() {
 
         sendProgress("기타 HMM 모델 파일 로딩 중...", 85);
         
-        // Fetch and write local python scripts to Pyodide's virtual filesystem
-        const resHmm = await fetch("guitar_hmm.py");
+        // Fetch and write local python scripts to Pyodide's virtual filesystem with cache-buster
+        const cacheBuster = "?v=" + new Date().getTime();
+        const resHmm = await fetch("guitar_hmm.py" + cacheBuster);
         const codeHmm = await resHmm.text();
         pyodide.FS.writeFile("guitar_hmm.py", codeHmm);
 
-        const resParser = await fetch("mxl_parser.py");
+        const resParser = await fetch("mxl_parser.py" + cacheBuster);
         const codeParser = await resParser.text();
         pyodide.FS.writeFile("mxl_parser.py", codeParser);
 
